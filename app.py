@@ -6,33 +6,30 @@ import plotly.express as px
 
 DB_PATH = "crime.db"
 
-st.set_page_config(
-    page_title="공공데이터 범죄 시각화 대시보드",
-    layout="wide"
-)
-
-st.title("공공데이터 범죄 시각화 대시보드")
+st.set_page_config(page_title="범죄 공공데이터 대시보드", layout="wide")
+st.title("범죄 공공데이터 시각화 대시보드")
 
 if not os.path.exists(DB_PATH):
-    st.error("crime.db 파일이 없습니다. app.py와 같은 폴더에 crime.db를 넣어주세요.")
+    st.error("crime.db 파일이 없습니다. app.py와 같은 폴더에 crime.db를 업로드해주세요.")
     st.stop()
 
 conn = sqlite3.connect(DB_PATH)
 
-def run_query(sql):
+def query(sql):
     return pd.read_sql_query(sql, conn)
 
-st.info("각 차트는 시각화, 사용 SQL, 인사이트를 함께 보여줍니다.")
+time_cols = [
+    "00:00-02:59", "03:00-05:59", "06:00-08:59", "09:00-11:59",
+    "12:00-14:59", "15:00-17:59", "18:00-20:59", "21:00-23:59"
+]
 
-
-# --------------------------------------------------
+# -------------------------------------------------
 # 1. 죄종(대)별 범죄발생시간 MAX
-# --------------------------------------------------
-
+# -------------------------------------------------
 st.header("1. 죄종(대)와 범죄발생시간대의 상관관계")
 
 sql1 = """
-SELECT 
+SELECT
     "죄종(대)",
     SUM("00:00-02:59") AS "00:00-02:59",
     SUM("03:00-05:59") AS "03:00-05:59",
@@ -46,12 +43,7 @@ FROM "범죄발생시간대 및 요일"
 GROUP BY "죄종(대)";
 """
 
-df1 = run_query(sql1)
-
-time_cols = [
-    "00:00-02:59", "03:00-05:59", "06:00-08:59", "09:00-11:59",
-    "12:00-14:59", "15:00-17:59", "18:00-20:59", "21:00-23:59"
-]
+df1 = query(sql1)
 
 df1_long = df1.melt(
     id_vars="죄종(대)",
@@ -59,6 +51,8 @@ df1_long = df1.melt(
     var_name="범죄발생시간대",
     value_name="발생건수"
 )
+
+max_time = df1_long.loc[df1_long.groupby("죄종(대)")["발생건수"].idxmax()]
 
 fig1 = px.line(
     df1_long,
@@ -71,79 +65,105 @@ fig1 = px.line(
 
 st.plotly_chart(fig1, use_container_width=True)
 
-with st.expander("사용한 SQL 보기"):
+st.subheader("죄종(대)별 범죄발생시간 MAX")
+st.dataframe(max_time, use_container_width=True)
+
+with st.expander("사용한 SQL"):
     st.code(sql1, language="sql")
 
-st.write("""
+top_row = max_time.sort_values("발생건수", ascending=False).iloc[0]
+st.write(f"""
 **인사이트**  
-죄종(대)별로 범죄가 많이 발생하는 시간대가 다르게 나타난다.  
-특정 범죄군이 야간이나 오후 시간대에 집중된다면, 해당 시간대 중심의 순찰 및 예방 전략이 필요하다.
+전체적으로 `{top_row["죄종(대)"]}` 범죄는 `{top_row["범죄발생시간대"]}` 시간대에 가장 많이 발생했다.  
+죄종별로 집중되는 시간대가 다르기 때문에, 범죄 예방 정책은 단순 전체 건수가 아니라 시간대별 위험도를 기준으로 세우는 것이 효과적이다.
 """)
 
 
-# --------------------------------------------------
+# -------------------------------------------------
 # 2. 검거성별과 범죄발생시간대의 상관관계
-# --------------------------------------------------
-
+# -------------------------------------------------
 st.header("2. 검거성별과 범죄발생시간대의 상관관계")
 
 sql2 = """
 SELECT
     t."죄종(대)",
-    SUM(t."00:00-02:59") AS "00:00-02:59",
-    SUM(t."03:00-05:59") AS "03:00-05:59",
-    SUM(t."06:00-08:59") AS "06:00-08:59",
-    SUM(t."09:00-11:59") AS "09:00-11:59",
-    SUM(t."12:00-14:59") AS "12:00-14:59",
-    SUM(t."15:00-17:59") AS "15:00-17:59",
-    SUM(t."18:00-20:59") AS "18:00-20:59",
-    SUM(t."21:00-23:59") AS "21:00-23:59",
-    SUM(c."검거인원(남)") AS "검거인원(남)",
-    SUM(c."검거인원(여)") AS "검거인원(여)",
-    SUM(c."검거인원(불상)") AS "검거인원(불상)"
+    t."죄종(중)",
+    t."00:00-02:59",
+    t."03:00-05:59",
+    t."06:00-08:59",
+    t."09:00-11:59",
+    t."12:00-14:59",
+    t."15:00-17:59",
+    t."18:00-20:59",
+    t."21:00-23:59",
+    c."검거인원(남)",
+    c."검거인원(여)",
+    c."검거인원(불상)"
 FROM "범죄발생시간대 및 요일" t
 JOIN "범죄발생 및 검거현황" c
 ON t."죄종(대)" = c."죄종(대)"
-AND t."죄종(중)" = c."죄종(중)"
-GROUP BY t."죄종(대)";
+AND t."죄종(중)" = c."죄종(중)";
 """
 
-df2 = run_query(sql2)
+df2 = query(sql2)
 
-df2_gender = df2[["죄종(대)", "검거인원(남)", "검거인원(여)", "검거인원(불상)"]]
+df2["총검거인원"] = (
+    df2["검거인원(남)"] +
+    df2["검거인원(여)"] +
+    df2["검거인원(불상)"]
+)
 
-df2_long = df2_gender.melt(
-    id_vars="죄종(대)",
+time_long = df2.melt(
+    id_vars=["죄종(대)", "죄종(중)", "검거인원(남)", "검거인원(여)", "검거인원(불상)", "총검거인원"],
+    value_vars=time_cols,
+    var_name="범죄발생시간대",
+    value_name="시간대발생건수"
+)
+
+gender_long = time_long.melt(
+    id_vars=["죄종(대)", "죄종(중)", "범죄발생시간대", "시간대발생건수", "총검거인원"],
+    value_vars=["검거인원(남)", "검거인원(여)", "검거인원(불상)"],
     var_name="검거성별",
     value_name="검거인원"
 )
 
+gender_long["성별_시간대_추정값"] = gender_long["시간대발생건수"] * (
+    gender_long["검거인원"] / gender_long["총검거인원"].replace(0, pd.NA)
+)
+
+chart2_df = gender_long.groupby(
+    ["범죄발생시간대", "검거성별"],
+    as_index=False
+)["성별_시간대_추정값"].sum()
+
 fig2 = px.bar(
-    df2_long,
-    x="죄종(대)",
-    y="검거인원",
+    chart2_df,
+    x="범죄발생시간대",
+    y="성별_시간대_추정값",
     color="검거성별",
     barmode="group",
-    title="죄종(대)별 검거성별 인원 비교"
+    title="범죄발생시간대별 검거성별 추정 분포"
 )
 
 st.plotly_chart(fig2, use_container_width=True)
 
-with st.expander("사용한 SQL 보기"):
+with st.expander("사용한 SQL"):
     st.code(sql2, language="sql")
 
-st.write("""
+max_gender_row = chart2_df.sort_values("성별_시간대_추정값", ascending=False).iloc[0]
+
+st.write(f"""
 **인사이트**  
-죄종(대)에 따라 검거된 인원의 성별 분포가 다르게 나타난다.  
-범죄발생시간대 자료와 검거현황을 연결하면, 특정 범죄군의 발생 패턴과 검거 대상 특성을 함께 파악할 수 있다.
+그래프상 `{max_gender_row["검거성별"]}`은 `{max_gender_row["범죄발생시간대"]}` 시간대에서 가장 높은 검거 분포를 보인다.  
+즉, 해당 시간대에 발생량이 많고 검거 인원 비중도 높게 나타나므로, 이 시간대가 검거 활동과 범죄 발생이 동시에 집중되는 구간으로 해석할 수 있다.  
+단, 원자료에는 성별별 시간대 검거건수가 직접 존재하지 않기 때문에, 이 값은 발생시간대와 검거성별 비율을 결합한 추정값이다.
 """)
 
 
-# --------------------------------------------------
-# 3. 검거율 지역 TOP 10
-# --------------------------------------------------
-
-st.header("3. 검거율 지역 TOP 10")
+# -------------------------------------------------
+# 3. 검거율 지역 TOP 5
+# -------------------------------------------------
+st.header("3. 검거율 지역 TOP 5")
 
 region_cols = [
     "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
@@ -167,7 +187,7 @@ region_cols = [
 
 union_sql = "\nUNION ALL\n".join([
     f"""
-    SELECT 
+    SELECT
         '{col}' AS 지역,
         SUM(r."{col}") AS 발생건수,
         SUM(c."검거") AS 검거건수
@@ -184,51 +204,60 @@ SELECT
     지역,
     발생건수,
     검거건수,
+    ROUND(검거건수 / 10.0, 1) AS "검거건수_단위10",
     ROUND(CAST(검거건수 AS REAL) / 발생건수 * 100, 2) AS 검거율
 FROM (
     {union_sql}
 )
 WHERE 발생건수 > 0
-ORDER BY 검거건수 DESC
-LIMIT 10;
+ORDER BY 검거율 DESC
+LIMIT 5;
 """
 
-df3 = run_query(sql3)
+df3 = query(sql3)
 
 fig3 = px.bar(
     df3,
-    x="검거건수",
+    x="검거건수_단위10",
     y="지역",
     orientation="h",
     text="검거율",
-    title="총 검거건수 상위 10개 지역"
+    title="검거율 높은 지역 TOP 5"
 )
 
-fig3.update_layout(yaxis={"categoryorder": "total ascending"})
+fig3.update_layout(
+    xaxis_title="검거건수 / 10",
+    yaxis_title="지역",
+    yaxis={"categoryorder": "total ascending"}
+)
 
 st.plotly_chart(fig3, use_container_width=True)
 
-with st.expander("사용한 SQL 보기"):
+st.dataframe(df3, use_container_width=True)
+
+with st.expander("사용한 SQL"):
     st.code(sql3, language="sql")
 
-st.write("""
+top_region = df3.iloc[0]
+
+st.write(f"""
 **인사이트**  
-총 검거건수가 높은 지역은 범죄 발생 규모 자체가 큰 지역일 가능성이 높다.  
-따라서 단순 검거건수뿐 아니라 발생건수 대비 검거율을 함께 확인해야 지역별 치안 효율성을 더 정확히 해석할 수 있다.
+검거율이 가장 높은 지역은 `{top_region["지역"]}`이며, 검거율은 약 `{top_region["검거율"]}%`로 나타났다.  
+그래프에서는 검거건수를 10으로 나누어 표시했기 때문에 지역 간 차이를 더 보기 쉽게 비교할 수 있다.  
+검거건수만 보면 인구나 사건 수가 많은 지역이 유리하므로, 검거율 기준으로 보는 것이 더 의미 있다.
 """)
 
 
-# --------------------------------------------------
+# -------------------------------------------------
 # 배포 안내
-# --------------------------------------------------
-
-st.header("배포 방법")
+# -------------------------------------------------
+st.header("GitHub 업로드 및 Streamlit 배포 방법")
 
 st.write("""
-1. GitHub에 `app.py`, `requirements.txt`, `crime.db`를 같은 저장소에 업로드합니다.  
-2. Streamlit Community Cloud에 접속한 뒤 GitHub 저장소를 연결합니다.  
-3. 실행 파일 경로를 `app.py`로 설정하고 Deploy를 누르면 됩니다.  
-4. 배포 후 데이터 파일명이 `crime.db`로 정확한지 꼭 확인하세요.
+1. GitHub 저장소에 `app.py`, `requirements.txt`, `crime.db`를 같은 위치에 업로드합니다.  
+2. Streamlit Community Cloud에서 GitHub 저장소를 연결합니다.  
+3. 실행 파일 경로를 `app.py`로 설정한 뒤 Deploy를 누릅니다.  
+4. 오류가 나면 `Manage app → Reboot app` 또는 `Redeploy`를 눌러 다시 실행합니다.
 """)
 
 conn.close()
